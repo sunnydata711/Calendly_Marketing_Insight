@@ -1,0 +1,24 @@
+-- one-time build
+--  for Dashboard_1.1. Daily Booking By Channel, "gold/daily_bookings_by_channel/" will be created automaticaly by below SQL.
+
+CREATE TABLE marketing_data.daily_bookings_by_channel
+WITH (
+  format = 'PARQUET',
+  external_location = 's3://dea-calendly-data/gold/daily_bookings_by_channel/',
+  partitioned_by = ARRAY['booking_date']
+) AS
+SELECT
+  "channel"                                       AS channel,
+  COUNT(booking_id)                      AS bookings,
+  CAST(dt AS DATE)                                AS booking_date   -- << partition col LAST
+FROM "AwsDataCatalog"."marketing_data"."calendly_events"
+WHERE "channel" IS NOT NULL AND trim("channel") <> ''
+GROUP BY "channel", CAST(dt AS DATE);
+
+
+-- Verify
+
+SELECT *
+FROM marketing_data.daily_bookings_by_channel
+WHERE booking_date BETWEEN DATE '2025-09-30' AND DATE '2025-10-06'
+ORDER BY booking_date, channel;

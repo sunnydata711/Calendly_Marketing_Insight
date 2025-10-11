@@ -1,0 +1,36 @@
+
+--- Cost Per Booking By Channel. for Dashboard 2
+
+CREATE TABLE marketing_data.cpb_by_channel
+WITH (
+  format = 'PARQUET',
+  external_location = 's3://dea-calendly-data/gold/cpb_by_channel/'
+) AS
+WITH bookings AS (
+  SELECT
+    "channel" AS channel,
+    COUNT(DISTINCT booking_id) AS bookings
+  FROM "AwsDataCatalog"."marketing_data"."calendly_events"
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+  GROUP BY "channel"
+),
+spend AS (
+  SELECT
+    "channel" AS channel,
+    CAST(SUM(CAST(spend AS DOUBLE)) AS DOUBLE) AS channel_cost
+  FROM "AwsDataCatalog"."marketing_data"."events_spend"
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+  GROUP BY "channel"
+)
+SELECT
+  b.channel,
+  s.channel_cost                      AS total_spend,
+  b.bookings                          AS total_bookings,
+  ROUND(s.channel_cost / NULLIF(b.bookings, 0), 2) AS cpb
+FROM bookings b
+JOIN spend s ON b.channel = s.channel;
+
+
+SELECT channel, total_spend, total_bookings, cpb
+FROM marketing_data.cpb_by_channel
+ORDER BY cpb;

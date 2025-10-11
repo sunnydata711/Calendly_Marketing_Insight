@@ -1,0 +1,40 @@
+
+--- for Dashboard 3 -- cumulative_bookings_by_source_daily
+
+
+
+CREATE TABLE marketing_data.cumulative_bookings_by_source_daily_dt
+WITH (
+  format = 'PARQUET',
+  external_location = 's3://dea-calendly-data/gold/cumulative_bookings_by_source_daily_dt/',
+  partitioned_by = ARRAY['dt']
+) AS
+WITH daily AS (
+  SELECT
+    "channel"                      AS source,
+    DATE(dt)                       AS dt,
+    COUNT(DISTINCT booking_id)     AS bookings
+  FROM marketing_data.calendly_events
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+  GROUP BY "channel", DATE(dt)
+)
+SELECT
+  source,
+  bookings,
+  SUM(bookings) OVER (
+    PARTITION BY source
+    ORDER BY dt
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  )                                 AS cumulative_bookings,
+  dt                                 -- partition column LAST
+FROM daily;
+
+
+
+
+
+
+-- Area chart (cumulative)
+SELECT dt, source, cumulative_bookings
+FROM marketing_data.cumulative_bookings_by_source_daily_dt
+ORDER BY dt, source;

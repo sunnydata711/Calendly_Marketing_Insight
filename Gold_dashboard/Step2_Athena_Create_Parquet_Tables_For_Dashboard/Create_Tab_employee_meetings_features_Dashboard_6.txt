@@ -1,0 +1,28 @@
+
+
+-- Do NOT pre-create the folder; Athena will create it.
+--- for Dash Board 6 -- weekly procedure
+------------------------------------------------------------
+CREATE TABLE marketing_data.employee_meetings_features
+WITH (
+  format = 'PARQUET',
+  external_location = 's3://dea-calendly-data/gold/employee_meetings_features/',
+  partitioned_by = ARRAY['week_start_date']          -- partition column must be LAST
+) AS
+WITH base AS (
+  SELECT
+    "organizer_email"                                        AS employee_id,
+    scheduled_event_id                                       AS meeting_id,
+    (scheduled_event_start AT TIME ZONE 'America/New_York')  AS start_local,
+    COALESCE(invitee_status, '')                             AS invitee_status
+  FROM "AwsDataCatalog"."marketing_data"."calendly_events"
+  WHERE "organizer_email" IS NOT NULL AND TRIM("organizer_email") <> ''
+)
+SELECT
+  employee_id,
+  meeting_id,
+  CAST(start_local AS DATE)                     AS meeting_date,      -- local calendar date
+  CAST(date_trunc('week', start_local) AS DATE) AS week_start_date    -- partition LAST
+FROM base
+WHERE invitee_status NOT IN ('canceled', 'cancelled');
+

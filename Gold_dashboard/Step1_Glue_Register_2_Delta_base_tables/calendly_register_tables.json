@@ -1,0 +1,59 @@
+{
+	"jobConfig": {
+		"name": "calendly_register_tables",
+		"description": "",
+		"role": "arn:aws:iam::598006991770:role/dea-calendly-glue-role",
+		"command": "glueetl",
+		"version": "5.0",
+		"runtime": null,
+		"workerType": "G.1X",
+		"numberOfWorkers": 10,
+		"maxCapacity": 10,
+		"jobRunQueuingEnabled": false,
+		"maxRetries": 0,
+		"timeout": 480,
+		"maxConcurrentRuns": 1,
+		"security": "none",
+		"scriptName": "calendly_register_tables.py",
+		"scriptLocation": "s3://aws-glue-assets-598006991770-us-east-1/scripts/",
+		"language": "python-3",
+		"spark": true,
+		"sparkConfiguration": "standard",
+		"jobParameters": [
+			{
+				"key": "--SILVER_EVENTS_PATH",
+				"value": "s3://dea-calendly-data/silver/calendly_events",
+				"existing": false
+			},
+			{
+				"key": "--conf",
+				"value": "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog",
+				"existing": false
+			},
+			{
+				"key": "--datalake-formats",
+				"value": "delta",
+				"existing": false
+			}
+		],
+		"tags": [],
+		"jobMode": "DEVELOPER_MODE",
+		"createdOn": "2025-10-06T13:41:00.406Z",
+		"developerMode": true,
+		"connectionsList": [],
+		"temporaryDirectory": "s3://aws-glue-assets-598006991770-us-east-1/temporary/",
+		"glueHiveMetastore": true,
+		"etlAutoTuning": true,
+		"metrics": true,
+		"observabilityMetrics": true,
+		"bookmark": "job-bookmark-disable",
+		"sparkPath": "s3://aws-glue-assets-598006991770-us-east-1/sparkHistoryLogs/",
+		"flexExecution": false,
+		"minFlexWorkers": null,
+		"maintenanceWindow": null,
+		"logging": false
+	},
+	"hasBeenSaved": false,
+	"usageProfileName": null,
+	"script": "# calendly_register_tables.py  (Glue 4/5, Spark job)\r\nimport sys\r\nfrom awsglue.utils import getResolvedOptions\r\nfrom awsglue.context import GlueContext\r\nfrom awsglue.job import Job\r\nfrom pyspark.context import SparkContext\r\n\r\n# --- Glue bootstrap ---\r\nargs = getResolvedOptions(sys.argv, [\"JOB_NAME\"])\r\nsc = SparkContext()\r\nglueContext = GlueContext(sc)\r\nspark = glueContext.spark_session\r\njob = Job(glueContext)\r\njob.init(args[\"JOB_NAME\"], args)\r\n\r\n# --- Create DB + register existing Delta tables in the Glue Data Catalog ---\r\nspark.sql(\"CREATE DATABASE IF NOT EXISTS marketing_data\")\r\n\r\nspark.sql(\"DROP TABLE IF EXISTS marketing_data.calendly_events;\")\r\n\r\nspark.sql(\"\"\"\r\nCREATE TABLE IF NOT EXISTS marketing_data.calendly_events\r\nUSING DELTA\r\nLOCATION 's3://dea-calendly-data/silver/calendly_events'\r\n\"\"\")\r\n\r\nspark.sql(\"DROP TABLE IF EXISTS marketing_data.events_spend;\")\r\n\r\nspark.sql(\"\"\"\r\nCREATE TABLE IF NOT EXISTS marketing_data.events_spend\r\nUSING DELTA\r\nLOCATION 's3://dea-calendly-data/silver/events_spend'\r\n\"\"\")\r\n\r\n# --- Quick verification ---\r\ndf_events = spark.read.format(\"delta\").load(\"s3://dea-calendly-data/silver/calendly_events\")\r\ndf_spend  = spark.read.format(\"delta\").load(\"s3://dea-calendly-data/silver/events_spend\")\r\nprint(f\"[CHECK] events rows={df_events.count()}, spend rows={df_spend.count()}\")\r\ndf_events.select(\"booking_id\",\"channel\",\"invitee_email\",\"dt\").show(10, truncate=False)\r\ndf_spend.select(\"channel\",\"spend\",\"dt\").show(10, truncate=False)\r\n\r\njob.commit()\r\n"
+}

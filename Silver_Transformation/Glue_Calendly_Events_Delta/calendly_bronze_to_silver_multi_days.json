@@ -1,0 +1,78 @@
+{
+	"jobConfig": {
+		"name": "calendly_bronze_to_silver_multi_days",
+		"description": "",
+		"role": "arn:aws:iam::598006991770:role/dea-calendly-glue-role",
+		"command": "glueetl",
+		"version": "5.0",
+		"runtime": null,
+		"workerType": "G.1X",
+		"numberOfWorkers": 10,
+		"maxCapacity": 10,
+		"jobRunQueuingEnabled": false,
+		"maxRetries": 0,
+		"timeout": 480,
+		"maxConcurrentRuns": 1,
+		"security": "none",
+		"scriptName": "calendly_bronze_to_silver_multi_days.py",
+		"scriptLocation": "s3://aws-glue-assets-598006991770-us-east-1/scripts/",
+		"language": "python-3",
+		"spark": true,
+		"sparkConfiguration": "standard",
+		"jobParameters": [
+			{
+				"key": "--END_DATE",
+				"value": "2025-10-06",
+				"existing": false
+			},
+			{
+				"key": "--JOB_NAME",
+				"value": "calendly_bronze_to_silver_multi_days",
+				"existing": false
+			},
+			{
+				"key": "--RAW_PREFIX",
+				"value": "s3://dea-calendly-data/bronze/calendly/webhooks",
+				"existing": false
+			},
+			{
+				"key": "--SILVER_EVENTS_PATH",
+				"value": "s3://dea-calendly-data/silver/calendly_events",
+				"existing": false
+			},
+			{
+				"key": "--START_DATE",
+				"value": "2025-09-30",
+				"existing": false
+			},
+			{
+				"key": "--conf",
+				"value": "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog",
+				"existing": false
+			},
+			{
+				"key": "--datalake-formats",
+				"value": "delta",
+				"existing": false
+			}
+		],
+		"tags": [],
+		"jobMode": "DEVELOPER_MODE",
+		"createdOn": "2025-10-08T06:05:39.451Z",
+		"developerMode": true,
+		"connectionsList": [],
+		"temporaryDirectory": "s3://aws-glue-assets-598006991770-us-east-1/temporary/",
+		"glueHiveMetastore": true,
+		"etlAutoTuning": true,
+		"metrics": true,
+		"observabilityMetrics": true,
+		"bookmark": "job-bookmark-disable",
+		"sparkPath": "s3://aws-glue-assets-598006991770-us-east-1/sparkHistoryLogs/",
+		"flexExecution": false,
+		"minFlexWorkers": null,
+		"maintenanceWindow": null
+	},
+	"hasBeenSaved": false,
+	"usageProfileName": null,
+	"script": "# calendly_bronze_to_silver_multi.py\r\n# Glue 5 / Spark 3.5 / Python 3\r\n\r\nimport sys\r\nfrom datetime import datetime, timedelta\r\nfrom awsglue.utils import getResolvedOptions\r\nfrom awsglue.context import GlueContext\r\nfrom pyspark.context import SparkContext\r\nfrom pyspark.sql import functions as F\r\n\r\n# -------------------- Args --------------------\r\nargs = getResolvedOptions(sys.argv, [\r\n    \"JOB_NAME\",\r\n    \"RAW_PREFIX\",         # e.g. s3://dea-calendly-data/raw/calendly_events\r\n    \"START_DATE\",         # e.g. 2025-09-30\r\n    \"END_DATE\"            # e.g. 2025-10-06\r\n])\r\n\r\nraw_prefix = args[\"RAW_PREFIX\"].strip()\r\nstart_date = datetime.strptime(args[\"START_DATE\"], \"%Y-%m-%d\").date()\r\nend_date   = datetime.strptime(args[\"END_DATE\"], \"%Y-%m-%d\").date()\r\nsilver_events_path = \"s3://dea-calendly-data/silver/calendly_events\"\r\n\r\n# -------------------- Glue Context --------------------\r\nsc = SparkContext.getOrCreate()\r\nglue = GlueContext(sc)\r\nspark = glue.spark_session\r\n\r\n# enable fast S3 I/O\r\nspark._jsc.hadoopConfiguration().set(\"fs.s3a.fast.upload\", \"true\")\r\n\r\n# -------------------- Utility: build list of dates --------------------\r\ndef daterange(start, end):\r\n    for n in range(int((end - start).days) + 1):\r\n        yield (start + timedelta(n)).strftime(\"%Y-%m-%d\")\r\n\r\nDATES = list(daterange(start_date, end_date))\r\nprint(f\"[INFO] Will rebuild for dates: {DATES}\")\r\n\r\n# -------------------- Channel mapping --------------------\r\nchannel_map = {\r\n    \"https://api.calendly.com/event_types/d639ecd3-8718-4068-955a-436b10d72c78\": \"facebook_paid_ads\",\r\n    \"https://api.calendly.com/event_types/dbb4ec50-38cd-4bcd-bbff-efb7b5a6f098\": \"youtube_paid_ads\",\r\n    \"https://api.calendly.com/event_types/bb339e98-7a67-4af2-b584-8dbf95564312\": \"tiktok_paid_ads\",\r\n}\r\nchannel_map_expr = F.create_map([F.lit(x) for kv in channel_map.items() for x in kv])\r\n\r\n# -------------------- Function to process one day --------------------\r\ndef build_day_df(dt):\r\n    src_path = f\"{raw_prefix}/dt={dt}/*\"\r\n    raw = spark.read.json(src_path)\r\n\r\n    booking_id = F.regexp_extract(F.col(\"payload.uri\"), r\"/invitees/([^/?]+)$\", 1)\r\n    cal_event_type_url = F.col(\"payload.scheduled_event.event_type\")\r\n    booking_date = F.to_date(F.col(\"payload.scheduled_event.start_time\"))\r\n    booking_created_at = F.to_timestamp(F.col(\"payload.created_at\"))\r\n    start_ts = F.to_timestamp(F.col(\"payload.scheduled_event.start_time\"))\r\n    end_ts   = F.to_timestamp(F.col(\"payload.scheduled_event.end_time\"))\r\n    org_email = F.when(F.size(F.col(\"payload.scheduled_event.event_memberships\")) > 0,\r\n                       F.col(\"payload.scheduled_event.event_memberships\")[0][\"user_email\"])\r\n    org_name  = F.when(F.size(F.col(\"payload.scheduled_event.event_memberships\")) > 0,\r\n                       F.col(\"payload.scheduled_event.event_memberships\")[0][\"user_name\"])\r\n    org_uri   = F.when(F.size(F.col(\"payload.scheduled_event.event_memberships\")) > 0,\r\n                       F.col(\"payload.scheduled_event.event_memberships\")[0][\"user\"])\r\n\r\n    df = (\r\n        raw\r\n        .withColumn(\"webhook_event_name\", F.col(\"event\"))\r\n        .withColumn(\"webhook_received_at\", F.to_timestamp(F.col(\"created_at\")))\r\n        .withColumn(\"webhook_received_by\", F.col(\"created_by\"))\r\n        .withColumn(\"booking_id\", booking_id)\r\n        .withColumn(\"scheduled_event_id\",\r\n                    F.regexp_extract(F.col(\"payload.scheduled_event.uri\"),\r\n                                     r\"/scheduled_events/([^/?]+)$\", 1))\r\n        .withColumn(\"calendly_event_type_url\", cal_event_type_url)\r\n        .withColumn(\"channel\", channel_map_expr.getItem(cal_event_type_url))\r\n        .withColumn(\"booking_created_at\", booking_created_at)\r\n        .withColumn(\"booking_date\", booking_date)\r\n        .withColumn(\"scheduled_event_start\", start_ts)\r\n        .withColumn(\"scheduled_event_end\", end_ts)\r\n        .withColumn(\"scheduled_event_status\", F.col(\"payload.scheduled_event.status\"))\r\n        .withColumn(\"event_name\", F.col(\"payload.scheduled_event.name\"))\r\n        .withColumn(\"invitee_email\", F.lower(F.col(\"payload.email\")))\r\n        .withColumn(\"invitee_name\", F.col(\"payload.name\"))\r\n        .withColumn(\"invitee_status\", F.col(\"payload.status\"))\r\n        .withColumn(\"invitee_uri\", F.col(\"payload.uri\"))\r\n        .withColumn(\"invitee_timezone\", F.col(\"payload.timezone\"))\r\n        .withColumn(\"rescheduled\", F.col(\"payload.rescheduled\"))\r\n        .withColumn(\"cancel_url\", F.col(\"payload.cancel_url\"))\r\n        .withColumn(\"reschedule_url\", F.col(\"payload.reschedule_url\"))\r\n        .withColumn(\"text_reminder_number\", F.col(\"payload.text_reminder_number\"))\r\n        .withColumn(\"location_type\", F.col(\"payload.scheduled_event.location.type\"))\r\n        .withColumn(\"location_url\", F.col(\"payload.scheduled_event.location.join_url\"))\r\n        .withColumn(\"organizer_email\", org_email)\r\n        .withColumn(\"organizer_name\", org_name)\r\n        .withColumn(\"organizer_uri\", org_uri)\r\n        .withColumn(\"utm_source\",   F.col(\"payload.tracking.utm_source\"))\r\n        .withColumn(\"utm_campaign\", F.col(\"payload.tracking.utm_campaign\"))\r\n        .withColumn(\"utm_medium\",   F.col(\"payload.tracking.utm_medium\"))\r\n        .withColumn(\"utm_content\",  F.col(\"payload.tracking.utm_content\"))\r\n        .withColumn(\"utm_term\",     F.col(\"payload.tracking.utm_term\"))\r\n        .withColumn(\"dt\", F.lit(dt))\r\n    )\r\n\r\n    cols = [\r\n        \"booking_id\", \"scheduled_event_id\", \"calendly_event_type_url\", \"channel\",\r\n        \"event_name\", \"webhook_event_name\",\r\n        \"booking_created_at\", \"booking_date\", \"scheduled_event_start\", \"scheduled_event_end\",\r\n        \"invitee_email\", \"invitee_name\", \"invitee_status\", \"invitee_uri\", \"invitee_timezone\",\r\n        \"rescheduled\", \"cancel_url\", \"reschedule_url\", \"text_reminder_number\",\r\n        \"organizer_email\", \"organizer_name\", \"organizer_uri\",\r\n        \"location_type\", \"location_url\",\r\n        \"utm_source\", \"utm_campaign\", \"utm_medium\", \"utm_content\", \"utm_term\",\r\n        \"webhook_received_at\", \"webhook_received_by\",\r\n        \"dt\"\r\n    ]\r\n    return df.select(*cols)\r\n\r\n# -------------------- Main loop: rebuild all --------------------\r\nfor d in DATES:\r\n    print(f\"[INFO] Writing day {d}\")\r\n    df_day = build_day_df(d)\r\n    (df_day\r\n        .write\r\n        .format(\"delta\")\r\n        .mode(\"append\")                     # safe for multi-day rebuild\r\n        .partitionBy(\"dt\")\r\n        .save(silver_events_path))\r\n\r\nprint(\"[SUCCESS] Rebuild complete.\")\r\n"
+}
