@@ -1,7 +1,9 @@
-# silver_spend_from_public.py  (EMR 6.15 / Spark 3.4)
+# silver_spend_from_public.py  (EMR 7.10 / Spark 3.5)
 # This py will generate events_spend in delta format
+from datetime import date, timedelta  
 from pyspark.sql import SparkSession, functions as F
 import sys
+
 
 def die(msg, code=1):
     print(f"[ERROR] {msg}")
@@ -10,10 +12,14 @@ def die(msg, code=1):
 def main():
     if len(sys.argv) != 4:
         die("Usage: silver_spend_from_public.py <public_prefix> <PROCESS_DATE|ALL> <silver_out_path>\n"
-            "Example: silver_spend_from_public.py s3://betty-calendly-test/calendly_spend_data 2025-10-01 s3://dea-calendly-data/silver/calendly_spend")
+            "Initial Example: silver_spend_from_public.py s3://betty-calendly-test/calendly_spend_data 2025-10-01 s3://dea-calendly-data/silver/calendly_spend"
+            "Daily Incremental Example: silver_spend_from_public.py s3://betty-calendly-test/calendly_spend_data s3://dea-calendly-data/silver/calendly_spend")
 
     public_prefix = sys.argv[1].rstrip("/")
+    # Below for init: 
     process_date  = sys.argv[2]
+    # below for daily incremental
+    # process_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
     silver_out    = sys.argv[3].rstrip("/")
 
     spark = SparkSession.builder.appName("silver_spend_from_public").getOrCreate()
