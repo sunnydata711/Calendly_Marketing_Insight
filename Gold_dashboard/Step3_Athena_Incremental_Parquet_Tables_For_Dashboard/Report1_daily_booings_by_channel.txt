@@ -1,0 +1,9 @@
+INSERT INTO marketing_data.daily_bookings_by_channel
+SELECT
+  "channel"                          AS channel,
+  COUNT(DISTINCT booking_id)         AS bookings,
+  DATE(dt_ts)                        AS booking_date
+FROM marketing_data.calendly_events
+WHERE "channel" IS NOT NULL AND trim("channel") <> ''
+  AND dt = date_format(CURRENT_DATE - INTERVAL '1' DAY, '%Y-%m-%d') -- partition prune
+GROUP BY "channel", DATE(dt_ts);

@@ -1,0 +1,43 @@
+-- ==== Dashboard 3 — incremental (yesterday) ====
+
+WITH params AS (
+  SELECT (CURRENT_DATE - INTERVAL '1' DAY) AS target_dt
+),
+
+-- previous cumulative per source before target date
+prev AS (
+  SELECT
+    c.source,
+    -- latest cumulative before target_dt
+    max_by(c.cumulative_bookings, c.dt) AS prev_cum
+  FROM marketing_data.cumulative_bookings_by_source_daily_dt c
+  WHERE c.dt < (SELECT target_dt FROM params)
+  GROUP BY c.source
+),
+
+-- yesterday's daily bookings per source
+d AS (
+  SELECT
+    "channel"                  AS source,
+    DATE(dt)                   AS dt,
+    COUNT(DISTINCT booking_id) AS bookings
+  FROM marketing_data.calendly_events
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+    AND DATE(dt) = (SELECT target_dt FROM params)    -- <-- sysdate - 1
+  GROUP BY "channel", DATE(dt)
+)
+
+INSERT INTO marketing_data.cumulative_bookings_by_source_daily_dt
+SELECT
+  d.source,
+  d.bookings,
+  COALESCE(p.prev_cum, 0)
+    + SUM(d.bookings) OVER (
+        PARTITION BY d.source
+        ORDER BY d.dt
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS cumulative_bookings,
+  d.dt   -- partition column last
+FROM d
+LEFT JOIN prev p ON p.source = d.source
+ORDER BY d.dt, d.source;

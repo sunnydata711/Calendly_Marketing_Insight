@@ -1,0 +1,28 @@
+-- ==== employee_meetings_features (yesterday only, America/New_York) ====
+
+WITH params AS (
+  SELECT
+    CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York' - INTERVAL '1' DAY) AS DATE)                                   AS target_local_date,
+    CAST(date_trunc('week', (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York' - INTERVAL '1' DAY)) AS DATE)               AS target_week_start
+),
+base AS (
+  SELECT
+    "organizer_email"                                        AS employee_id,
+    scheduled_event_id                                       AS meeting_id,
+    (scheduled_event_start AT TIME ZONE 'America/New_York')  AS start_local,
+    COALESCE(invitee_status, '')                             AS invitee_status
+  FROM marketing_data.calendly_events
+  WHERE "organizer_email" IS NOT NULL AND TRIM("organizer_email") <> ''
+)
+
+INSERT INTO marketing_data.employee_meetings_features
+SELECT
+  employee_id,
+  meeting_id,
+  CAST(start_local AS DATE)                     AS meeting_date,
+  CAST(date_trunc('week', start_local) AS DATE) AS week_start_date   -- partition column LAST
+FROM base
+WHERE invitee_status NOT IN ('canceled','cancelled')
+  AND CAST(start_local AS DATE) = (SELECT target_local_date FROM params)
+  AND CAST(date_trunc('week', start_local) AS DATE) = (SELECT target_week_start FROM params)
+ORDER BY meeting_date, employee_id, meeting_id;

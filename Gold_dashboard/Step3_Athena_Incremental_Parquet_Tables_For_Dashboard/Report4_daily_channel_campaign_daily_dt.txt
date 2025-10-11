@@ -1,0 +1,62 @@
+-- ==== dashboard 4 -channel × campaign daily allocation (yesterday only) ====
+
+WITH params AS (
+  SELECT (CURRENT_DATE - INTERVAL '1' DAY) AS target_dt
+),
+ev AS (
+  SELECT
+    DATE(dt) AS dt,
+    "channel" AS source,
+    NULLIF(TRIM(utm_campaign), '') AS campaign,
+    booking_id
+  FROM marketing_data.calendly_events
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+    AND DATE(dt) = (SELECT target_dt FROM params)
+),
+bk AS (
+  SELECT dt, source, campaign, COUNT(DISTINCT booking_id) AS bookings
+  FROM ev
+  GROUP BY dt, source, campaign
+),
+bk_ch AS (
+  SELECT dt, source, COUNT(DISTINCT booking_id) AS bookings_channel
+  FROM ev
+  GROUP BY dt, source
+),
+sp_ch AS (
+  SELECT
+    DATE(dt) AS dt,
+    "channel" AS source,
+    SUM(TRY_CAST(spend AS DOUBLE)) AS spend_channel
+  FROM marketing_data.events_spend
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+    AND DATE(dt) = (SELECT target_dt FROM params)
+  GROUP BY DATE(dt), "channel"
+),
+alloc AS (
+  SELECT
+    bk.dt,
+    bk.source,
+    COALESCE(bk.campaign, '(none)') AS campaign,
+    bk.bookings                     AS total_bookings,
+    CASE
+      WHEN bk_ch.bookings_channel > 0
+      THEN COALESCE(sp_ch.spend_channel, 0) * (bk.bookings / bk_ch.bookings_channel)
+      ELSE 0
+    END AS total_spend
+  FROM bk
+  JOIN bk_ch
+    ON bk.dt = bk_ch.dt AND bk.source = bk_ch.source
+  LEFT JOIN sp_ch
+    ON sp_ch.dt = bk.dt AND sp_ch.source = bk.source
+)
+INSERT INTO marketing_data.channel_campaign_daily_dt
+SELECT
+  source,
+  campaign,
+  total_bookings,
+  total_spend,
+  ROUND(CASE WHEN total_bookings > 0 THEN total_spend / total_bookings END, 2) AS cpb,
+  dt   -- partition column LAST
+FROM alloc
+ORDER BY dt, source, campaign;

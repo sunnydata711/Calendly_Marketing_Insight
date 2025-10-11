@@ -1,0 +1,28 @@
+-- ==== booking_time_features (yesterday only, America/New_York) ====
+
+WITH params AS (
+  SELECT CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York' - INTERVAL '1' DAY) AS DATE) AS target_local_date
+),
+t AS (
+  SELECT
+    "channel" AS source,
+    booking_id,
+    at_timezone(
+      COALESCE(booking_created_at, webhook_received_at),
+      'America/New_York'
+    ) AS ts_local
+  FROM marketing_data.calendly_events
+  WHERE "channel" IS NOT NULL AND TRIM("channel") <> ''
+)
+INSERT INTO marketing_data.booking_time_features
+  (source, booking_id, hour_of_day, dow_num, dow_name, booking_date_local)
+SELECT
+  t.source,
+  t.booking_id,
+  hour(t.ts_local)                   AS hour_of_day,
+  day_of_week(t.ts_local)            AS dow_num,
+  format_datetime(t.ts_local, 'EEE') AS dow_name,
+  CAST(t.ts_local AS DATE)           AS booking_date_local   -- partition column last
+FROM t
+WHERE t.ts_local IS NOT NULL
+  AND CAST(t.ts_local AS DATE) = (SELECT target_local_date FROM params);
