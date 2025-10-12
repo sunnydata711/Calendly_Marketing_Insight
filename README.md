@@ -12,3 +12,8 @@ System Design for the Calendly Marketing Insight Project
 
 
 
+   <img width="787" height="383" alt="image" src="https://github.com/user-attachments/assets/94b08c4d-43fb-4f79-848b-4e132f9e6f11" />
+
+
+
+
