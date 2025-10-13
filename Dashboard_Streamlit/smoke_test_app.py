@@ -68,6 +68,13 @@ def athena_select_1(session):
 
 st.title("🔎 Athena / S3 Smoke Test")
 
+# 0) chekc region
+if st.button("Check bucket & app regions"):
+    s3 = make_session().client("s3", region_name=REGION)
+    bkt = "betty-athena-results"
+    loc = s3.get_bucket_location(Bucket=bkt)["LocationConstraint"] or "us-east-1"
+    st.write({"APP_REGION": REGION, "BUCKET_REGION": loc, "WORKGROUP": WORKGROUP, "OUTPUT": OUTPUT})
+
 # 1) Who am I?
 with st.expander("1) STS identity", expanded=True):
     try:
