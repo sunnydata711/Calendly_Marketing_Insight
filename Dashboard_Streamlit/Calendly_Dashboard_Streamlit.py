@@ -20,6 +20,8 @@ OUTPUT_S3  = st.secrets.get("ATHENA_S3_OUTPUT", "s3://betty-athena-results/calen
 DATABASE_D = st.secrets.get("ATHENA_DATABASE", "marketing_data")
 CATALOG    = st.secrets.get("ATHENA_CATALOG", "AwsDataCatalog")  # optional; Athena defaults to AwsDataCatalog
 
+ATHENA_TIMEOUT_S = 60  # 
+
 def make_session():
     # If you pasted keys into Streamlit Secrets, use them; otherwise credentials chain applies.
     return boto3.Session(
@@ -46,6 +48,9 @@ with st.sidebar:
         value=OUTPUT_S3,
         help="Athena writes query results here (must exist; require s3:PutObject)."
     )
+
+if output and not output.endswith("/"): output += "/"
+
 
 # ======================
 # 🔧 Diagnostics (temp)
@@ -117,31 +122,78 @@ with st.expander("Diagnostics (temporary)"):
 # ------------
 # Athena helper
 # ------------
+# def run_athena_query(sql: str, database: str, output: str, workgroup: str) -> pd.DataFrame:
+#     client = make_session().client("athena", region_name=REGION)
+#     q = client.start_query_execution(
+#         QueryString=sql,
+#         QueryExecutionContext={
+#             "Database": database,
+#             "Catalog": CATALOG,  # explicit; fine to keep
+#         },
+#         ResultConfiguration={"OutputLocation": output},
+#         WorkGroup=workgroup,
+#     )
+#     qid = q["QueryExecutionId"]
+
+#     # wait for completion
+#     while True:
+#         s = client.get_query_execution(QueryExecutionId=qid)
+#         state = s["QueryExecution"]["Status"]["State"]
+#         if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
+#             break
+#         time.sleep(0.4)
+#     if state != "SUCCEEDED":
+#         reason = s["QueryExecution"]["Status"].get("StateChangeReason", "Unknown")
+#         raise RuntimeError(f"Athena query {state}: {reason}")
+
+#     # paginate results
+#     paginator = client.get_paginator("get_query_results")
+#     cols, rows = None, []
+#     for page in paginator.paginate(QueryExecutionId=qid):
+#         if cols is None:
+#             cols = [c["Label"] for c in page["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
+#         for r in page["ResultSet"]["Rows"]:
+#             data = [x.get("VarCharValue") for x in r["Data"]]
+#             if data == cols:  # skip header row
+#                 continue
+#             rows.append(data)
+#     return pd.DataFrame(rows, columns=cols or [])
+
+
 def run_athena_query(sql: str, database: str, output: str, workgroup: str) -> pd.DataFrame:
     client = make_session().client("athena", region_name=REGION)
+
     q = client.start_query_execution(
         QueryString=sql,
-        QueryExecutionContext={
-            "Database": database,
-            "Catalog": CATALOG,  # explicit; fine to keep
-        },
+        QueryExecutionContext={"Database": database, "Catalog": CATALOG},
         ResultConfiguration={"OutputLocation": output},
         WorkGroup=workgroup,
     )
     qid = q["QueryExecutionId"]
 
-    # wait for completion
+    # wait with timeout
+    t0 = time.time()
+    last = None
     while True:
         s = client.get_query_execution(QueryExecutionId=qid)
-        state = s["QueryExecution"]["Status"]["State"]
+        status = s["QueryExecution"]["Status"]
+        state  = status["State"]
+        if state != last:
+            # optional: print state changes to Streamlit log if desired
+            last = state
         if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
             break
+        if time.time() - t0 > ATHENA_TIMEOUT_S:
+            raise TimeoutError(
+                f"Athena timed out after {ATHENA_TIMEOUT_S}s. "
+                f"Workgroup='{workgroup}' Database='{database}' Output='{output}'."
+            )
         time.sleep(0.4)
-    if state != "SUCCEEDED":
-        reason = s["QueryExecution"]["Status"].get("StateChangeReason", "Unknown")
-        raise RuntimeError(f"Athena query {state}: {reason}")
 
-    # paginate results
+    if state != "SUCCEEDED":
+        raise RuntimeError(f"Athena query {state}: {status.get('StateChangeReason','Unknown')}")
+
+    # paginate results -> DataFrame
     paginator = client.get_paginator("get_query_results")
     cols, rows = None, []
     for page in paginator.paginate(QueryExecutionId=qid):
@@ -149,10 +201,11 @@ def run_athena_query(sql: str, database: str, output: str, workgroup: str) -> pd
             cols = [c["Label"] for c in page["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
         for r in page["ResultSet"]["Rows"]:
             data = [x.get("VarCharValue") for x in r["Data"]]
-            if data == cols:  # skip header row
+            if data == cols:  # skip header row repeated by Athena
                 continue
             rows.append(data)
     return pd.DataFrame(rows, columns=cols or [])
+
 
 
 
