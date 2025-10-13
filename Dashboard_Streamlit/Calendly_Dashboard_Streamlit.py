@@ -55,110 +55,12 @@ if output and not output.endswith("/"): output += "/"
 # ======================
 # 🔧 Diagnostics (temp)
 # ======================
-with st.expander("Diagnostics (temporary)"):
-    session = make_session()
-    athena = session.client("athena", region_name=REGION)
-    s3 = session.client("s3", region_name=REGION)
-
-    # 1) Who am I?
-    if st.button("Show AWS caller identity"):
-        sts = session.client("sts", region_name=REGION)
-        st.write(sts.get_caller_identity())
-
-    # 2) S3 write test to results bucket (quick permission check)
-    if st.button("Test S3 write to results path"):
-        import uuid, urllib.parse
-        # parse bucket/key from 'output' (must end with '/')
-        assert output.endswith('/'), "S3 output must end with '/'."
-        no_scheme = output.replace("s3://", "", 1)
-        bucket = no_scheme.split("/", 1)[0]
-        prefix = no_scheme.split("/", 1)[1]
-        key = prefix + f"streamlit-probe-{uuid.uuid4()}.txt"
-        s3.put_object(Bucket=bucket, Key=key, Body=b"ok")
-        st.success(f"PutObject OK: s3://{bucket}/{key}")
-
-    # 3) Tiny Athena test with full status + timeout
-    if st.button("Run Athena SELECT 1 test"):
-        q = athena.start_query_execution(
-            QueryString="SELECT 1 AS ok",
-            QueryExecutionContext={"Database": database, "Catalog": CATALOG},
-            ResultConfiguration={"OutputLocation": output},
-            WorkGroup=workgroup,
-        )
-        qid = q["QueryExecutionId"]
-        st.write("QueryExecutionId:", qid)
-
-        import time
-        t0 = time.time()
-        last_state = None
-        while True:
-            resp = athena.get_query_execution(QueryExecutionId=qid)
-            status = resp["QueryExecution"]["Status"]
-            state = status["State"]
-            if state != last_state:
-                st.write("State:", state)
-                last_state = state
-            if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
-                st.write("Final status:", status)
-                break
-            if time.time() - t0 > 60:  # 60s safety timeout
-                st.error("Timed out waiting for Athena. Check workgroup/output/permissions.")
-                break
-            time.sleep(0.5)
-
-        if state == "SUCCEEDED":
-            # fetch the first few rows
-            res = athena.get_query_results(QueryExecutionId=qid, MaxResults=5)
-            st.success("Query SUCCEEDED")
-            st.write(res)
-        else:
-            st.error("Query did not succeed.")
-            if "StateChangeReason" in status:
-                st.warning(status["StateChangeReason"])
-
 
 
 
 # ------------
 # Athena helper
 # ------------
-# def run_athena_query(sql: str, database: str, output: str, workgroup: str) -> pd.DataFrame:
-#     client = make_session().client("athena", region_name=REGION)
-#     q = client.start_query_execution(
-#         QueryString=sql,
-#         QueryExecutionContext={
-#             "Database": database,
-#             "Catalog": CATALOG,  # explicit; fine to keep
-#         },
-#         ResultConfiguration={"OutputLocation": output},
-#         WorkGroup=workgroup,
-#     )
-#     qid = q["QueryExecutionId"]
-
-#     # wait for completion
-#     while True:
-#         s = client.get_query_execution(QueryExecutionId=qid)
-#         state = s["QueryExecution"]["Status"]["State"]
-#         if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
-#             break
-#         time.sleep(0.4)
-#     if state != "SUCCEEDED":
-#         reason = s["QueryExecution"]["Status"].get("StateChangeReason", "Unknown")
-#         raise RuntimeError(f"Athena query {state}: {reason}")
-
-#     # paginate results
-#     paginator = client.get_paginator("get_query_results")
-#     cols, rows = None, []
-#     for page in paginator.paginate(QueryExecutionId=qid):
-#         if cols is None:
-#             cols = [c["Label"] for c in page["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
-#         for r in page["ResultSet"]["Rows"]:
-#             data = [x.get("VarCharValue") for x in r["Data"]]
-#             if data == cols:  # skip header row
-#                 continue
-#             rows.append(data)
-#     return pd.DataFrame(rows, columns=cols or [])
-
 
 def run_athena_query(sql: str, database: str, output: str, workgroup: str) -> pd.DataFrame:
     client = make_session().client("athena", region_name=REGION)
