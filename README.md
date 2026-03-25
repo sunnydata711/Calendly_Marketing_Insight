@@ -8,7 +8,7 @@ System Design for the Calendly Marketing Insight Project
 
 4. In a production setting, the best approach is likely to use EMR for everything—both the base tables (Calendly_events, events_spend) and the reporting tables—because it centralizes job and function management.
 
-5. I learned a lot from this project: EMR, Delta Lake, Glue with Delta format, and Athena with Parquet.
+
 
 
 
