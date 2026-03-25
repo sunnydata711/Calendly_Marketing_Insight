@@ -1,5 +1,11 @@
 # Ingest Calendly data from AWS API Gateway to s3://dea-calendly-data/bronze/calendly/webhooks/
-# ########################
+# ########################################################
+# 1. Event-level granularity: 1 file = 1 event
+# 2. Deduplication: Hash-based ID
+# 3. Partitioning: by date + event
+# 4. Replay safety
+# 5. (Add Error path later)
+# ########################################################
 import json, os, hashlib, base64, datetime, uuid
 import boto3
 
