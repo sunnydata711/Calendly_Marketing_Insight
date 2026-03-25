@@ -6,7 +6,7 @@ System Design for the Calendly Marketing Insight Project
 
 3. After finishing the two Delta-format base tables (Calendly_events and events_spend) with dt partitions and Delta logs, I tried two approaches to generate reporting tables—EMR and Athena. Both worked. For the final presentation, I used Athena because it let me easily query and verify the table results.
 
-4. In a production setting, the best approach is likely to use EMR for everything—both the base tables (Calendly_events, events_spend) and the reporting tables—because it centralizes job and function management.
+4. In a production setting, the best approach is likely to use cost optimization approach.
 
 
 
